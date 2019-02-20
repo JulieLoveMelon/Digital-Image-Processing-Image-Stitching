@@ -1,0 +1,75 @@
+clear all;
+image1=imread('1.jpg');
+image2=imread('2.jpg');
+image3=imread('3.jpg');
+
+%'keypoints.mat'是三幅图通过cpselect选取的控制点的矩阵的集合
+load('keypoints.mat');
+base1=base_points1(1:3,:);
+base2=base_points2(1:3,:);
+input1=input_points1(1:3,:);
+input2=input_points3(1:3,:);
+
+%通过matlab自带的函数maketform和imtransform完成仿射矩阵求取和仿射变换的过程
+affine_matrix1=maketform('affine',input1,base1);
+affine_matrix2=maketform('affine',input2,base2);
+new_image1=imtransform(image1,affine_matrix1);
+new_image2=imtransform(image3,affine_matrix2);
+
+%通过maketform返回值中的仿射矩阵得到控制点在新图像中对应的坐标
+T1=affine_matrix1.tdata.T;
+T2=affine_matrix1.tdata.T;
+input1_trans=T1*input1;
+input2_trans=T2*input2;
+%与配准图（中主）纵坐标的差异用于拼接时图像纵向的修正
+herr1=floor(input1_trans(1,2)-base1(1,2))
+herr2=floor((input2_trans(1,2)-base2(1,2))*1.1)
+
+%求三幅图各自的尺寸
+[height1 width1]=size(new_image1);
+[height3 width3]=size(new_image2);
+[height2 width2]=size(image2);
+width2=width2/3;
+width1=width1/3;
+width3=width3/3;
+%通过cpselect确定重叠区域
+load('border.mat');
+w1=floor(border1(1,1)+0.5);
+w2=floor(border2(1,1)+0.5);
+d1=width1-w1-460;
+d2=w2-460;
+height=max(max(height1,height2),height3)+1000;
+width=w1+width2+width3-w2;
+
+%创建新的画布，可以容纳拼接后的图像
+new_image=uint8(zeros(height,width,3));
+%由于新图像的高度是三幅图的最大值，故对于其他两幅图高度上补齐（补0）
+new_image_1=zeros(height,width1,3);
+new_image_2=zeros(height,width2,3);
+new_image_3=zeros(height,width3,3);
+new_image_1(floor(height*.5-height2*.5)-herr1:floor(height*.5+height2*.5)-herr1-1+height1-height2,1:width1,1:3)=new_image1(1:height1,1:width1,1:3);
+new_image_2(floor(height*.5-height2*.5)+1:floor(height*.5+height2*.5),1:width2,1:3)=image2(1:height2,1:width2,1:3);
+new_image_3(floor(height*.5-height2*.5)-herr2:floor(height*.5+height2*.5)-herr2-1+height3-height2,1:width3,1:3)=new_image2(1:height3,1:width3,1:3);
+
+%新图像最左侧部分由第一幅图（西主）决定
+new_image(1:height,1:w1+230,1:3)=new_image_1(1:height,1:w1+230,1:3);
+%新图像第一个重叠的区域由第一、二幅图（西主和中主）加权平均得到
+for i=1:height
+    for j=w1+230+1:width1-230
+        for k=1:3
+            new_image(i,j,k)=floor((width1-j)/(d1+460)*(new_image_1(i,j,k)))+floor((j-w1)/(d1+460)*new_image_2(i,j-w1,k));
+            %new_image(i,j,k)=floor(0.1*(new_image_1(i,j,k)))+floor(0.9*new_image_2(i,j-w1,k));
+        end
+    end
+end
+%新图像中间的部分由第二幅图（中主）决定
+new_image(1:height,width1-230+1:w1+width2-w2+230,1:3)=new_image_2(1:height,width1-w1+1-230:width2-w2+230,1:3);
+%新图像第二个重叠的区域由第二、三幅图（中主和东主）加权平均得到
+for i=w1+width2-w2+1+230:w1+width2-230
+   new_image(1:height,i,1:3)=new_image_2(1:height,i-w1,1:3)*(w1+width2-i)/(d2+460)+new_image_3(1:height,i-w1-width2+w2,1:3)*(i-w1-width2+w2)/(d2+460);
+   %new_image(1:height,i,1:3)=new_image_2(1:height,i-w1,1:3)*.9+new_image_3(1:height,i-w1-width2+w2,1:3)*.1;
+end
+%新图像最右侧部分由第三幅图（东主）决定
+new_image(1:height,w1+width2+1-230:width,1:3)=new_image_3(1:height,w2+1-230:width3,1:3);
+
+imshow(new_image)
